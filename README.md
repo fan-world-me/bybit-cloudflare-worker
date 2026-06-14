@@ -12,39 +12,73 @@
 
 ## Технологии
 
-| Компонент        | Технология                          |
+| Компонент       | Технология                          |
 |-----------------|-------------------------------------|
-| Runtime          | Cloudflare Workers (Python/Pyodide) |
+| Runtime         | Cloudflare Workers (Python/Pyodide) |
 | HTTP-фреймворк  | FastAPI (ASGI)                      |
-| База данных      | Cloudflare D1 (SQLite)              |
-| Источник данных  | Bybit REST API v5                   |
-| Расписание       | Cloudflare Cron Triggers            |
+| База данных     | Cloudflare D1 (SQLite)              |
+| Источник данных | Bybit REST API v5                   |
+| Расписание      | Cloudflare Cron Triggers            |
 
 ## Структура проекта
-
-```
 bybit-cloudflare-worker/
+
 ├── src/
+
 │   ├── index.py          # FastAPI приложение + on_scheduled handler
+
 │   ├── bybit_client.py   # Клиент Bybit API v5 (async, HMAC-SHA256)
+
 │   ├── database.py       # Операции с Cloudflare D1
+
 │   └── models.py         # Pydantic модели данных
-├── schema.sql            # SQL схема для D1 (применить вручную)
+
+├── schema.sql            # SQL схема для D1
+
 ├── wrangler.toml         # Конфиг Cloudflare Workers
-├── requirements.txt      # Зависимости для локальной разработки
+
+├── .env                  # Секреты (не попадает в Git)
+
+├── .env.example          # Шаблон переменных окружения
+
+├── requirements.txt      # Зависимости
+
 └── README.md
-```
 
 ## Быстрый старт
 
-### 1. Установка Wrangler
+### 1. Клонируй репозиторий
+
+```bash
+git clone https://github.com/fan-world-me/bybit-cloudflare-worker.git
+cd bybit-cloudflare-worker
+```
+
+### 2. Заполни `.env`
+
+```bash
+cp .env.example .env
+```
+
+Открой `.env` и заполни своими данными:
+
+```env
+BYBIT_API_KEY=твой_api_key
+BYBIT_API_SECRET=твой_api_secret
+CLOUDFLARE_ACCOUNT_ID=твой_account_id
+CLOUDFLARE_API_TOKEN=твой_api_token
+```
+
+> `.env` прописан в `.gitignore` — никогда не попадёт в Git.
+
+### 3. Установи Wrangler
 
 ```bash
 npm install -g wrangler
 wrangler login
 ```
 
-### 2. Создание D1 базы данных
+### 4. Создай D1 базу данных
 
 ```bash
 wrangler d1 create bybit-trades
@@ -56,23 +90,23 @@ wrangler d1 create bybit-trades
 [[d1_databases]]
 binding = "DB"
 database_name = "bybit-trades"
-database_id = "ТВОЙ_DATABASE_ID_СЮДА"
+database_id = "ВАШ_DATABASE_ID"
 ```
 
-### 3. Применение схемы
+### 5. Накати схему
 
 ```bash
-wrangler d1 execute bybit-trades --file=schema.sql
+wrangler d1 execute bybit-trades --remote --file=schema.sql
 ```
 
-### 4. Добавление секретов
+### 6. Добавь секреты в Cloudflare
 
 ```bash
 wrangler secret put BYBIT_API_KEY
 wrangler secret put BYBIT_API_SECRET
 ```
 
-### 5. Деплой
+### 7. Деплой
 
 ```bash
 wrangler deploy
@@ -80,24 +114,11 @@ wrangler deploy
 
 ## API эндпоинты
 
-| Метод  | Путь      | Описание                                |
-|--------|----------|-----------------------------------------|
-| GET    | /health  | Проверка состояния сервиса              |
-| GET    | /trades  | Список последних сделок из D1 (`?limit=20`) |
-| POST   | /sync    | Ручной запуск синхронизации с Bybit     |
-
-### Примеры запросов
-
-```bash
-# Проверить статус
-curl https://bybit-trades-sync.YOUR_SUBDOMAIN.workers.dev/health
-
-# Последние 50 сделок
-curl https://bybit-trades-sync.YOUR_SUBDOMAIN.workers.dev/trades?limit=50
-
-# Ручная синхронизация
-curl -X POST https://bybit-trades-sync.YOUR_SUBDOMAIN.workers.dev/sync
-```
+| Метод | Путь     | Описание                              |
+|-------|----------|---------------------------------------|
+| GET   | /health  | Проверка состояния сервиса            |
+| GET   | /trades  | Список последних сделок (`?limit=20`) |
+| POST  | /sync    | Ручной запуск синхронизации с Bybit   |
 
 ### Пример ответа `/sync`
 
@@ -112,59 +133,24 @@ curl -X POST https://bybit-trades-sync.YOUR_SUBDOMAIN.workers.dev/sync
 
 ## Cron расписание
 
-Воркер запускается автоматически по расписанию, заданному в `wrangler.toml`:
-
 ```toml
 [triggers]
-crons = ["0 */6 * * *"]   # каждые 6 часов (00:00, 06:00, 12:00, 18:00 UTC)
+crons = ["0 */6 * * *"]  # каждые 6 часов (00:00, 06:00, 12:00, 18:00 UTC)
 ```
-
-Изменить расписание можно в `wrangler.toml` — [формат cron стандартный](https://developers.cloudflare.com/workers/configuration/cron-triggers/).
-
-## Схема базы данных D1
-
-```sql
-CREATE TABLE trades (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    exec_id         TEXT    NOT NULL UNIQUE,   -- уникальный ID исполнения
-    order_id        TEXT    NOT NULL,
-    symbol          TEXT    NOT NULL,           -- BTCUSDT, ETHUSDT, ...
-    category        TEXT    NOT NULL,           -- spot / linear / inverse
-    side            TEXT    NOT NULL,           -- Buy / Sell
-    order_type      TEXT    NOT NULL,           -- Market / Limit
-    exec_price      TEXT    NOT NULL,
-    exec_qty        TEXT    NOT NULL,
-    exec_value      TEXT    NOT NULL,
-    exec_fee        TEXT    NOT NULL,
-    fee_currency    TEXT    NOT NULL,
-    exec_time       TEXT    NOT NULL,           -- timestamp в мс
-    order_link_id   TEXT,
-    stop_order_type TEXT,
-    created_at      INTEGER NOT NULL DEFAULT (unixepoch())
-);
-```
-
-## Локальная разработка
-
-```bash
-pip install -r requirements.txt
-```
-
-> **Примечание:** для локального тестирования используй `uvicorn src.index:app --reload`. Привязки D1 и секреты доступны только в среде Cloudflare Workers — локально их нужно мокировать.
 
 ## Получение API ключей Bybit
 
 1. Войди в [Bybit](https://www.bybit.com)
 2. Перейди в **Account** → **API Management**
-3. Создай ключ с разрешениями: **Read** → **Unified Trading** / **Spot** / **Derivatives**
-4. Сохрани API Key и API Secret
+3. Создай ключ с разрешениями: **Read** → **Unified Trading / Spot / Derivatives**
+4. Скопируй API Key и API Secret в `.env`
 
 ## Безопасность
 
-- Секреты хранятся в Cloudflare Secrets (не в коде)
+- Секреты хранятся в Cloudflare Secrets — не в коде и не в репозитории
+- `.env` защищён `.gitignore`
 - Подпись запросов к Bybit: HMAC-SHA256
-- Все данные остаются в твоей инфраструктуре Cloudflare
 
 ## Лицензия
 
-Этот проект распространяется под лицензией [GNU General Public License v3.0](LICENSE).
+[GNU General Public License v3.0](LICENSE)
