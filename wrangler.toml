@@ -1,0 +1,15 @@
+name = "bybit-trades-sync"
+main = "src/index.py"
+compatibility_date = "2024-03-25"
+compatibility_flags = ["python_workers"]
+
+[vars]
+BYBIT_BASE_URL = "https://api.bybit.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bybit-trades"
+database_id = "4f254078-131a-4075-8de2-f131eb75e485"
+
+[triggers]
+crons = ["0 */6 * * *"]
